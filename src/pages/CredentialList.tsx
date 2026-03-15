@@ -373,14 +373,6 @@ const CredentialList = () => {
                     className="text-sm"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Metadata URI</Label>
-                  <Input
-                    value={editForm.metadataURI}
-                    onChange={(e) => setEditForm((f) => f && { ...f, metadataURI: e.target.value })}
-                    className="text-sm"
-                  />
-                </div>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Credential types (e.g. Diploma | Certificate)</Label>

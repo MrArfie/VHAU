@@ -563,15 +563,6 @@ const IssueCredential = () => {
                       className="text-sm"
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Metadata URI (optional)</Label>
-                    <Input
-                      placeholder="https:// or ipfs://"
-                      value={form.metadataURI}
-                      onChange={(e) => setForm((f) => ({ ...f, metadataURI: e.target.value }))}
-                      className="text-sm"
-                    />
-                  </div>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">Diploma image (optional)</Label>
@@ -600,7 +591,9 @@ const IssueCredential = () => {
                     )}
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Upload from your device. Image is stored in this browser only and will show on the credential profile when viewed on this device. For a permanent URL (any device), use Metadata URI above with an image link.
+                    {isCloudinaryConfigured()
+                      ? "Upload from your device. Image is stored in the cloud and will show on all devices."
+                      : "Upload from your device. Image is stored in this browser only and will show when viewed on this device."}
                   </p>
                 </div>
                 <div className="space-y-1.5">

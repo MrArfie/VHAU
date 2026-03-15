@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, User, Search, ArrowLeft, Mail, Calendar, MapPin, GraduationCap, Award } from "lucide-react";
 import { readCredential, getTokenIdByStudentNumber } from "@/lib/ethereum";
-import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY, parseMetadataURIImages } from "@/lib/utils";
+import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY, parseMetadataURIImages, isHttpUrl } from "@/lib/utils";
 
 interface Credential {
   title: string;
@@ -106,15 +106,17 @@ const Credentials = () => {
         const program = (raw?.program ?? raw?.[1] ?? "") as string;
         const institution = (raw?.institution ?? raw?.[2] ?? "") as string;
         const credentialTitle = (raw?.credentialTitle ?? raw?.[3] ?? "") as string;
-        const issuedDate = (raw?.issuedDate ?? raw?.[6] ?? "") as string;
+        const issuedDate = (raw?.issuedDate ?? raw?.[5] ?? "") as string;
         const batch = (raw?.batch ?? raw?.[8] ?? "") as string;
         const email = (raw?.email ?? raw?.[9] ?? "") as string;
         const location = (raw?.location ?? raw?.[10] ?? "") as string;
         const active = (raw?.active ?? raw?.[12] ?? false) as boolean;
-        const metadataURI = (raw?.metadataURI ?? "") as string;
+        const metadataURI = (raw?.metadataURI ?? raw?.[6] ?? "") as string;
         const { profileImageUrl: fromMetaProfile, diplomaImageUrl: fromMetaDiploma } = parseMetadataURIImages(metadataURI);
-        const titleStrings = (credentialTitle || "On-chain Credential").split(CREDENTIAL_TITLE_DELIMITER).map((t) => t.trim()).filter(Boolean);
-        const typeStrings = (credentialTypes || "").split(CREDENTIAL_TITLE_DELIMITER).map((t) => t.trim()).filter(Boolean);
+        const rawTitles = (credentialTitle || "On-chain Credential").split(CREDENTIAL_TITLE_DELIMITER).map((t) => t.trim()).filter(Boolean);
+        const rawTypes = (credentialTypes || "").split(CREDENTIAL_TITLE_DELIMITER).map((t) => t.trim()).filter(Boolean);
+        const titleStrings = rawTitles.filter((t) => !isHttpUrl(t));
+        const typeStrings = rawTypes.slice(0, titleStrings.length);
         const defaultCredType: "diploma" | "certificate" = String(credentialType).toLowerCase().includes("diploma") ? "diploma" : "certificate";
         const getTypeForIndex = (i: number): "diploma" | "certificate" =>
           typeStrings[i] && String(typeStrings[i]).toLowerCase().includes("diploma") ? "diploma" : "certificate";
@@ -200,22 +202,24 @@ const Credentials = () => {
         const program = (raw?.program ?? raw?.[1] ?? "") as string;
         const institution = (raw?.institution ?? raw?.[2] ?? "") as string;
         const credentialTitle = (raw?.credentialTitle ?? raw?.[3] ?? "") as string;
-        const issuedDate = (raw?.issuedDate ?? raw?.[6] ?? "") as string;
+        const issuedDate = (raw?.issuedDate ?? raw?.[5] ?? "") as string;
         const batch = (raw?.batch ?? raw?.[8] ?? "") as string;
         const email = (raw?.email ?? raw?.[9] ?? "") as string;
         const location = (raw?.location ?? raw?.[10] ?? "") as string;
         const active = (raw?.active ?? raw?.[12] ?? false) as boolean;
-        const metadataURI = (raw?.metadataURI ?? "") as string;
+        const metadataURI = (raw?.metadataURI ?? raw?.[6] ?? "") as string;
         const { profileImageUrl: fromMetaProfile, diplomaImageUrl: fromMetaDiploma } = parseMetadataURIImages(metadataURI);
 
-        const titleStrings = (credentialTitle || "On-chain Credential")
+        const rawTitles = (credentialTitle || "On-chain Credential")
             .split(CREDENTIAL_TITLE_DELIMITER)
             .map((t) => t.trim())
             .filter(Boolean);
-        const typeStrings = (credentialTypes || "")
+        const rawTypes = (credentialTypes || "")
             .split(CREDENTIAL_TITLE_DELIMITER)
             .map((t) => t.trim())
             .filter(Boolean);
+        const titleStrings = rawTitles.filter((t) => !isHttpUrl(t));
+        const typeStrings = rawTypes.slice(0, titleStrings.length);
         const defaultCredType: "diploma" | "certificate" = String(credentialType).toLowerCase().includes("diploma") ? "diploma" : "certificate";
         const getTypeForIndex = (i: number): "diploma" | "certificate" =>
           typeStrings[i] && String(typeStrings[i]).toLowerCase().includes("diploma") ? "diploma" : "certificate";
@@ -346,29 +350,29 @@ const Credentials = () => {
               </p>
 
               {/* Contact & details */}
-              <div className="mt-5 space-y-1.5 text-xs text-muted-foreground">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Mail className="w-3 h-3" />
-                  <span>{profile.email}</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Calendar className="w-3 h-3" />
-                  <span>Issued {profile.dateIssued}</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <MapPin className="w-3 h-3" />
-                  <span>{profile.location}</span>
-                </div>
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Mail className="w-3 h-3 shrink-0" />
+                  {profile.email}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="w-3 h-3 shrink-0" />
+                  {isHttpUrl(profile.dateIssued) ? "Issued —" : `Issued ${profile.dateIssued}`}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="w-3 h-3 shrink-0" />
+                  {profile.location}
+                </span>
               </div>
 
-              {/* Wallet & Token Buttons */}
-              <div className="flex items-center gap-3 mt-6">
-                <button className="px-5 py-2 rounded-full bg-primary text-primary-foreground text-[11px] font-semibold tracking-wide uppercase">
+              {/* Wallet & credential ID chips */}
+              <div className="flex items-center justify-center gap-3 mt-6 flex-wrap">
+                <span className="inline-flex items-center px-4 py-2 rounded-full bg-muted/80 text-muted-foreground text-xs font-medium">
                   Wallet {profile.walletAddress}
-                </button>
-                <button className="px-5 py-2 rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold tracking-wide uppercase">
-                  Token {profile.tokenId}
-                </button>
+                </span>
+                <span className="inline-flex items-center px-4 py-2 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                  Credential {profile.tokenId}
+                </span>
               </div>
             </div>
 
@@ -380,7 +384,7 @@ const Credentials = () => {
               return (
                 <div className="mt-8 mx-4 sm:mx-6">
                   <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground uppercase mb-3 text-center">
-                    Credential document
+                    Credential Document
                   </p>
                   <div className="w-full min-h-[200px] sm:min-h-[280px] rounded-2xl border border-border/50 bg-gradient-to-b from-amber-50/90 to-amber-100/40 dark:from-amber-950/20 dark:to-amber-900/10 shadow-inner overflow-hidden flex items-center justify-center p-4 sm:p-6">
                     {imageUrl ? (
@@ -437,9 +441,11 @@ const Credentials = () => {
                           <Award className="w-4 h-4 text-primary" />
                         )}
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-semibold text-foreground">{cred.title}</p>
+                          <p className="text-sm font-semibold text-foreground break-words">
+                            {isHttpUrl(cred.title) ? "—" : cred.title}
+                          </p>
                           <Badge
                             className={`text-[10px] px-2 py-0 rounded font-semibold uppercase shrink-0 ${
                               cred.type === "diploma"
@@ -450,11 +456,13 @@ const Credentials = () => {
                             {cred.type}
                           </Badge>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{cred.institution}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {isHttpUrl(cred.institution) ? "Holy Angel University" : cred.institution}
+                        </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 shrink-0 ml-4">
-                      <span className="text-xs text-muted-foreground">{cred.date}</span>
+                      <span className="text-xs text-muted-foreground">{isHttpUrl(cred.date) ? "" : cred.date}</span>
                       {cred.verified && (
                         <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[hsl(var(--credential-verified))]/10 border border-[hsl(var(--credential-verified))]/20">
                           <CheckCircle className="w-3 h-3 text-[hsl(var(--credential-verified))]" />

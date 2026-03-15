@@ -109,7 +109,8 @@ export async function saveImageToLocalStorage(
 /** Delimiter used in metadataURI to store profile and diploma image URLs: "profileUrl|diplomaUrl". */
 export const METADATA_IMAGE_DELIMITER = "|";
 
-function isHttpUrl(s: string): boolean {
+/** True if the string looks like an HTTP(S) URL (used to hide raw URLs from UI). */
+export function isHttpUrl(s: string): boolean {
   const t = s.trim();
   return t.startsWith("http://") || t.startsWith("https://");
 }
