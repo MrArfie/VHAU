@@ -38,3 +38,13 @@ The app shows that error when the **deployed** contract still uses `_safeMint`. 
 
 - Open **Add credential**, connect the **same** MetaMask account you used to deploy, and issue a credential.
 - The “contract may still use _safeMint” error should stop once the app is using the newly deployed contract that uses `_mint`.
+
+## 5. Hosted site: images on all devices (Cloudinary)
+
+If you deploy the frontend (e.g. Vercel, Netlify), images will only show on other devices (e.g. your phone) if Cloudinary is configured for the deployed build.
+
+1. In your hosting provider, open the project, Settings, Environment variables.
+2. Add: VITE_CLOUDINARY_CLOUD_NAME (your cloud name) and VITE_CLOUDINARY_UPLOAD_PRESET (your unsigned preset name).
+3. Redeploy the site so the new build includes these env vars.
+4. On the live site, open Add credential. You should see a green Cloud storage enabled banner. If you see Cloud storage not configured, the env vars were not set or the build did not pick them up.
+5. New credentials issued with images will then show on any device. For existing credentials, use View all credentials, Edit, replace the images and save so the new cloud URLs are stored on-chain.

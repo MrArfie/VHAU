@@ -402,7 +402,9 @@ const CredentialList = () => {
               </div>
 
               <div className="border-t pt-4 space-y-2">
-                <Label className="text-xs">Replace images (optional, stored in this browser)</Label>
+                <Label className="text-xs">
+                  Replace images (optional{isCloudinaryConfigured() ? ", uploaded to cloud" : ", stored in this browser"})
+                </Label>
                 <div className="flex gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
                     <Input
@@ -423,7 +425,11 @@ const CredentialList = () => {
                     {editDiplomaFile && <span className="text-xs text-muted-foreground">{editDiplomaFile.name}</span>}
                   </div>
                 </div>
-                <p className="text-[11px] text-muted-foreground">Profile photo (left) and diploma document (right). Images are saved in this browser only — no transaction or gas. Changing text above and saving will send an on-chain update.</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {isCloudinaryConfigured()
+                    ? "Profile photo (left) and diploma document (right). Images will be uploaded to Cloudinary and saved on-chain so they show on all devices. Saving may require a transaction to update the credential."
+                    : "Profile photo (left) and diploma document (right). Images are saved in this browser only — no transaction or gas. Changing text above and saving will send an on-chain update."}
+                </p>
               </div>
 
               {saveError && <p className="text-xs text-destructive">{saveError}</p>}

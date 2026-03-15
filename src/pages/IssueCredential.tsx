@@ -297,6 +297,14 @@ const IssueCredential = () => {
                   </div>
                 </div>
               )}
+              {/* Cloud storage status: so users know if images will show on other devices */}
+              <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${isCloudinaryConfigured() ? "border-green-500/50 bg-green-500/10 text-green-800 dark:text-green-200" : "border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200"}`} role="status">
+                {isCloudinaryConfigured() ? (
+                  <span><strong>Cloud storage enabled.</strong> Profile and diploma images will be saved to the cloud and will show on all devices (phone, other computers).</span>
+                ) : (
+                  <span><strong>Cloud storage not configured.</strong> Images will only show on this device. To show images on phones and other devices: add <code className="rounded bg-black/10 dark:bg-white/10 px-1">VITE_CLOUDINARY_CLOUD_NAME</code> and <code className="rounded bg-black/10 dark:bg-white/10 px-1">VITE_CLOUDINARY_UPLOAD_PRESET</code> to your hosting provider&apos;s environment variables (e.g. Vercel or Netlify), then redeploy.</span>
+                )}
+              </div>
               {isOwner && (
                 <div className="mb-4 rounded-lg border border-border/60 bg-muted/20 px-4 py-3 space-y-2">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Manage issuers</p>
