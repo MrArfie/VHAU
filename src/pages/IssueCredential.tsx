@@ -11,8 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getConnectedAccount, getContractOwner, getIsIssuer, issueCredential, addIssuer, removeIssuer, HAU_VAULT_ADDRESS, type IssueCredentialData } from "@/lib/ethereum";
-import { CREDENTIAL_TITLE_DELIMITER } from "@/lib/utils";
-import { Wallet, CheckCircle, ArrowRight, AlertTriangle, Plus, X } from "lucide-react";
+import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY } from "@/lib/utils";
+import { Wallet, CheckCircle, ArrowRight, AlertTriangle, Plus, X, ImagePlus } from "lucide-react";
 
 /** Credential titles and their specializations/programs (for dropdowns). */
 const CREDENTIAL_TITLE_TO_PROGRAMS: Record<string, string[]> = {
@@ -95,6 +95,7 @@ const IssueCredential = () => {
   const [issuerAddress, setIssuerAddress] = useState("");
   const [issuerActionLoading, setIssuerActionLoading] = useState(false);
   const [issuerActionError, setIssuerActionError] = useState<string | null>(null);
+  const [diplomaFile, setDiplomaFile] = useState<File | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,7 +183,26 @@ const IssueCredential = () => {
         credentialTitle: credentialTitleValue,
         credentialTypes: credentialTypesValue,
       });
-      setIssuedTokenId(tokenId.toString());
+      const tokenIdStr = tokenId.toString();
+      if (diplomaFile) {
+        try {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result as string);
+            r.onerror = () => reject(new Error("Failed to read file"));
+            r.readAsDataURL(diplomaFile);
+          });
+          if (dataUrl.length > 4_500_000) {
+            console.warn("Diploma image too large for local storage (~5MB limit); not saved.");
+          } else {
+            localStorage.setItem(CREDENTIAL_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl);
+          }
+        } catch (err) {
+          console.warn("Could not save diploma image locally:", err);
+        }
+        setDiplomaFile(null);
+      }
+      setIssuedTokenId(tokenIdStr);
       setForm(defaultData);
       setAdditionalEntries([]);
       setRecipientAddress("");
@@ -496,6 +516,36 @@ const IssueCredential = () => {
                       className="text-sm"
                     />
                   </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Diploma image (optional)</Label>
+                  <div className="flex gap-2 items-center flex-wrap">
+                    <Input
+                      type="file"
+                      accept="image/*"
+                      className="text-sm max-w-[240px]"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        setDiplomaFile(f || null);
+                      }}
+                    />
+                    {diplomaFile && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        {diplomaFile.name}
+                        <button
+                          type="button"
+                          onClick={() => setDiplomaFile(null)}
+                          className="text-destructive hover:underline ml-1"
+                        >
+                          Remove
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Upload from your device. Image is stored in this browser only and will show on the credential profile when viewed on this device. For a permanent URL (any device), use Metadata URI above with an image link.
+                  </p>
                 </div>
                 {error && (
                   <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">

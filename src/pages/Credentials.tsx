@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, User, Search, ArrowLeft, Mail, Calendar, MapPin, GraduationCap, Award } from "lucide-react";
 import { readCredential, getTokenIdByStudentNumber } from "@/lib/ethereum";
-import { CREDENTIAL_TITLE_DELIMITER } from "@/lib/utils";
+import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY } from "@/lib/utils";
 
 interface Credential {
   title: string;
@@ -25,6 +25,8 @@ interface StudentProfile {
   walletAddress: string;
   tokenId: string;
   credentials: Credential[];
+  /** URL for diploma/credential image (from metadataURI when issuing). */
+  diplomaImageUrl?: string;
 }
 
 const mockProfile: StudentProfile = {
@@ -127,6 +129,8 @@ const Credentials = () => {
         const email = (raw?.email ?? raw?.[9] ?? "") as string;
         const location = (raw?.location ?? raw?.[10] ?? "") as string;
         const active = (raw?.active ?? raw?.[12] ?? false) as boolean;
+        const metadataURI = (raw?.metadataURI ?? "") as string;
+        const diplomaImageUrl = metadataURI && (metadataURI.startsWith("http://") || metadataURI.startsWith("https://")) ? metadataURI : undefined;
 
         const titleStrings = (credentialTitle || "On-chain Credential")
             .split(CREDENTIAL_TITLE_DELIMITER)
@@ -168,6 +172,7 @@ const Credentials = () => {
           walletAddress: "0x…",
           tokenId: `#${tokenIdToUse.toString()}`,
           credentials: credentialsList,
+          diplomaImageUrl,
         };
 
         setProfile(chainProfile);
@@ -268,8 +273,44 @@ const Credentials = () => {
               </div>
             </div>
 
-            {/* Yellow Banner */}
-            <div className="w-full h-28 rounded-3xl bg-accent mt-6" />
+            {/* Diploma / credential document display */}
+            {(() => {
+              const numericTokenId = profile.tokenId.replace(/^#/, "");
+              const localImageUrl = typeof localStorage !== "undefined" ? localStorage.getItem(CREDENTIAL_IMAGE_STORAGE_KEY + numericTokenId) : null;
+              const imageUrl = localImageUrl || profile.diplomaImageUrl;
+              return (
+                <div className="mt-8 mx-4 sm:mx-6">
+                  <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground uppercase mb-3 text-center">
+                    Credential document
+                  </p>
+                  <div className="w-full min-h-[200px] sm:min-h-[280px] rounded-2xl border border-border/50 bg-gradient-to-b from-amber-50/90 to-amber-100/40 dark:from-amber-950/20 dark:to-amber-900/10 shadow-inner overflow-hidden flex items-center justify-center p-4 sm:p-6">
+                    {imageUrl ? (
+                      <div className="w-full h-full min-h-[180px] sm:min-h-[240px] flex items-center justify-center relative">
+                        <img
+                          src={imageUrl}
+                          alt="Diploma or credential"
+                          className="max-w-full max-h-[240px] sm:max-h-[320px] w-auto h-auto object-contain drop-shadow-md rounded-sm"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.style.display = "none";
+                            const fallback = e.currentTarget.parentElement?.querySelector(".diploma-fallback");
+                            if (fallback instanceof HTMLElement) fallback.classList.remove("hidden");
+                          }}
+                        />
+                        <div className="diploma-fallback hidden absolute inset-0 w-full min-h-[180px] sm:min-h-[240px] flex items-center justify-center text-muted-foreground/50">
+                          <GraduationCap className="w-16 h-16 sm:w-20 sm:h-20" />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-full min-h-[180px] sm:min-h-[240px] flex flex-col items-center justify-center text-muted-foreground/50 gap-2">
+                        <GraduationCap className="w-14 h-14 sm:w-16 sm:h-16" />
+                        <span className="text-xs font-medium">No document image</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* On-Chain Credentials */}
             <div className="px-6 pt-10 pb-8">
