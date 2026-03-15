@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, User, Search, ArrowLeft, Mail, Calendar, MapPin, GraduationCap, Award } from "lucide-react";
-import { readCredential } from "@/lib/ethereum";
+import { readCredential, getTokenIdByStudentNumber } from "@/lib/ethereum";
+import { CREDENTIAL_TITLE_DELIMITER } from "@/lib/utils";
 
 interface Credential {
   title: string;
@@ -71,6 +72,7 @@ const Credentials = () => {
   const [username, setUsername] = useState("");
   const [course, setCourse] = useState("");
   const [studentId, setStudentId] = useState("");
+  const [studentNumber, setStudentNumber] = useState("");
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -81,42 +83,120 @@ const Credentials = () => {
     setError(null);
     setLoading(true);
 
-    try {
-      const tokenId = BigInt(studentId || "0");
-      const onchain = await readCredential(tokenId);
+    const trimmedId = String(studentId || "").trim();
+    const trimmedStudentNum = String(studentNumber || "").trim();
+    const tokenIdNum = trimmedId === "" ? 0 : parseInt(trimmedId, 10);
+    const hasValidTokenId =
+      !Number.isNaN(tokenIdNum) && tokenIdNum >= 1 && Number.isInteger(tokenIdNum);
+    const hasStudentNumber = trimmedStudentNum.length > 0;
+    const hasNameOrCourse = username.trim() !== "" || course.trim() !== "";
 
-      const chainProfile: StudentProfile = {
-        name: onchain.studentName || username || "Student",
-        degree: onchain.program || course || "Program",
-        batch: "Batch 2021 — 2025",
-        email: "onchain@hau.edu", // placeholder – not stored on chain in this contract
-        dateIssued: onchain.issuedDate || "On-chain record",
-        location: "On-chain",
-        walletAddress: "0x…", // would come from your issuance flow
-        tokenId: `#${tokenId.toString()}`,
-        credentials: [
-          {
-            title: onchain.credentialTitle || "On-chain Credential",
-            type: onchain.credentialType.toLowerCase().includes("diploma") ? "diploma" : "certificate",
-            institution: onchain.institution || "Holy Angel University",
-            date: onchain.issuedDate || "",
-            verified: onchain.active,
-          },
-        ],
-      };
-
-      setProfile(chainProfile);
-      setSearched(true);
-    } catch (err) {
-      console.error(err);
-      // Fallback to mock profile so the UI still works
-      setError("Unable to reach on-chain credentials. Showing sample data instead.");
-      setProfile(mockProfile);
-      setSearched(true);
-    } finally {
+    if (!hasValidTokenId && !hasStudentNumber && !hasNameOrCourse) {
+      setError("Enter a student number, credential token ID (1, 2, 3…), and/or name or program.");
       setLoading(false);
+      return;
     }
+
+    let tokenIdToUse: bigint | null = null;
+    if (hasValidTokenId) {
+      tokenIdToUse = BigInt(tokenIdNum);
+    } else if (hasStudentNumber) {
+      const fromMap = await getTokenIdByStudentNumber(trimmedStudentNum);
+      if (fromMap > 0n) tokenIdToUse = fromMap;
+      else {
+        setError(`No on-chain credential found for student number "${trimmedStudentNum}". Try token ID or show sample.`);
+        setProfile(buildSampleFromInputs());
+        setSearched(true);
+        setLoading(false);
+        return;
+      }
+    }
+
+    if (tokenIdToUse != null && tokenIdToUse > 0n) {
+      try {
+        const onchain = await readCredential(tokenIdToUse);
+        const raw = onchain as Record<string, unknown>;
+        const credentialType = (raw?.credentialType ?? raw?.[4] ?? "") as string;
+        const credentialTypes = (raw?.credentialTypes ?? raw?.[11] ?? "") as string;
+        const studentName = (raw?.studentName ?? raw?.[0] ?? "") as string;
+        const program = (raw?.program ?? raw?.[1] ?? "") as string;
+        const institution = (raw?.institution ?? raw?.[2] ?? "") as string;
+        const credentialTitle = (raw?.credentialTitle ?? raw?.[3] ?? "") as string;
+        const issuedDate = (raw?.issuedDate ?? raw?.[6] ?? "") as string;
+        const batch = (raw?.batch ?? raw?.[8] ?? "") as string;
+        const email = (raw?.email ?? raw?.[9] ?? "") as string;
+        const location = (raw?.location ?? raw?.[10] ?? "") as string;
+        const active = (raw?.active ?? raw?.[12] ?? false) as boolean;
+
+        const titleStrings = (credentialTitle || "On-chain Credential")
+            .split(CREDENTIAL_TITLE_DELIMITER)
+            .map((t) => t.trim())
+            .filter(Boolean);
+        const typeStrings = (credentialTypes || "")
+            .split(CREDENTIAL_TITLE_DELIMITER)
+            .map((t) => t.trim())
+            .filter(Boolean);
+        const defaultCredType: "diploma" | "certificate" = String(credentialType).toLowerCase().includes("diploma") ? "diploma" : "certificate";
+        const getTypeForIndex = (i: number): "diploma" | "certificate" =>
+          typeStrings[i] && String(typeStrings[i]).toLowerCase().includes("diploma") ? "diploma" : "certificate";
+        const credentialsList: Credential[] =
+          titleStrings.length > 0
+            ? titleStrings.map((title, i) => ({
+                title,
+                type: typeStrings[i] !== undefined && typeStrings[i] !== "" ? getTypeForIndex(i) : defaultCredType,
+                institution: institution || "Holy Angel University",
+                date: issuedDate || "",
+                verified: active,
+              }))
+            : [
+                {
+                  title: "On-chain Credential",
+                  type: defaultCredType,
+                  institution: institution || "Holy Angel University",
+                  date: issuedDate || "",
+                  verified: active,
+                },
+              ];
+
+        const chainProfile: StudentProfile = {
+          name: studentName || username || "Student",
+          degree: program || course || "Program",
+          batch: batch || "Batch 2021 — 2025",
+          email: email || "onchain@hau.edu",
+          dateIssued: issuedDate || "On-chain record",
+          location: location || "On-chain",
+          walletAddress: "0x…",
+          tokenId: `#${tokenIdToUse.toString()}`,
+          credentials: credentialsList,
+        };
+
+        setProfile(chainProfile);
+        setSearched(true);
+      } catch (err) {
+        console.error(err);
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        setError(`On-chain lookup failed (${msg}). Showing sample data instead.`);
+        setProfile(buildSampleFromInputs());
+        setSearched(true);
+      }
+    } else {
+      setProfile(buildSampleFromInputs());
+      setError(
+        "Enter a student number or credential token ID (1, 2, 3…) for on-chain lookup. Showing sample data."
+      );
+      setSearched(true);
+    }
+
+    setLoading(false);
   };
+
+  function buildSampleFromInputs(): StudentProfile {
+    return {
+      ...mockProfile,
+      name: username.trim() || mockProfile.name,
+      degree: course.trim() || mockProfile.degree,
+    };
+  }
 
   const handleBack = () => {
     setProfile(null);
@@ -124,6 +204,7 @@ const Credentials = () => {
     setUsername("");
     setCourse("");
     setStudentId("");
+    setStudentNumber("");
   };
 
   // Results View — matches Figma exactly
@@ -266,8 +347,7 @@ const Credentials = () => {
               Find a student&apos;s record
             </h1>
             <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-              Enter the details exactly as they appear in the registrar system to locate the student&apos;s on‑chain
-              credential profile.
+              Search by <strong>student number</strong> (e.g. 2021-000123) to load the on‑chain credential, or by token ID (1, 2, 3…). Name and program are optional.
             </p>
           </header>
 
@@ -284,10 +364,22 @@ const Credentials = () => {
                 className="h-10 text-sm"
               />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="studentNumber" className="text-xs text-muted-foreground">
+                Student number
+              </Label>
+              <Input
+                id="studentNumber"
+                placeholder="e.g. 2021-000123"
+                value={studentNumber}
+                onChange={(e) => setStudentNumber(e.target.value)}
+                className="h-10 text-sm"
+              />
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="course" className="text-xs text-muted-foreground">
-                  Program / course
+                  Program / course (optional)
                 </Label>
                 <Input
                   id="course"
@@ -299,11 +391,13 @@ const Credentials = () => {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="studentId" className="text-xs text-muted-foreground">
-                  Student ID
+                  Credential token ID (optional)
                 </Label>
                 <Input
                   id="studentId"
-                  placeholder="e.g. 2021‑000123"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="e.g. 1, 2, 3"
                   value={studentId}
                   onChange={(e) => setStudentId(e.target.value)}
                   className="h-10 text-sm"

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,8 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getConnectedAccount, issueCredential, type IssueCredentialData } from "@/lib/ethereum";
-import { Wallet, CheckCircle, ArrowRight } from "lucide-react";
+import { getConnectedAccount, getContractOwner, issueCredential, HAU_VAULT_ADDRESS, type IssueCredentialData } from "@/lib/ethereum";
+import { CREDENTIAL_TITLE_DELIMITER } from "@/lib/utils";
+import { Wallet, CheckCircle, ArrowRight, AlertTriangle, Plus, X } from "lucide-react";
 
 /** Credential titles and their specializations/programs (for dropdowns). */
 const CREDENTIAL_TITLE_TO_PROGRAMS: Record<string, string[]> = {
@@ -67,21 +68,44 @@ const CREDENTIAL_TITLES = Object.keys(CREDENTIAL_TITLE_TO_PROGRAMS);
 
 const defaultData: IssueCredentialData = {
   studentName: "",
+  studentNumber: "",
   program: "",
   institution: "Holy Angel University",
   credentialTitle: "",
   credentialType: "Diploma",
   issuedDate: "",
   metadataURI: "",
+  batch: "",
+  email: "",
+  location: "",
 };
+
+type AdditionalEntry = { title: string; type: "Diploma" | "Certificate" };
 
 const IssueCredential = () => {
   const [form, setForm] = useState<IssueCredentialData>(defaultData);
+  const [additionalEntries, setAdditionalEntries] = useState<AdditionalEntry[]>([]);
   const [recipientAddress, setRecipientAddress] = useState("");
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [contractOwner, setContractOwner] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [issuedTokenId, setIssuedTokenId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getContractOwner().then((owner) => {
+      if (!cancelled && owner) setContractOwner(owner);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isOwner =
+    walletAddress && contractOwner
+      ? walletAddress.toLowerCase() === contractOwner.toLowerCase()
+      : null;
 
   const handleConnect = async () => {
     setError(null);
@@ -107,6 +131,10 @@ const IssueCredential = () => {
       setError("Enter the student name.");
       return;
     }
+    if (!form.studentNumber.trim()) {
+      setError("Enter the student number (used for search).");
+      return;
+    }
     if (!form.credentialTitle) {
       setError("Select a credential title.");
       return;
@@ -126,9 +154,18 @@ const IssueCredential = () => {
 
     setLoading(true);
     try {
-      const tokenId = await issueCredential(to as `0x${string}`, form);
+      const allTitles = [form.credentialTitle, ...additionalEntries.map((e) => e.title)].filter(Boolean);
+      const credentialTitleValue = allTitles.length ? allTitles.join(CREDENTIAL_TITLE_DELIMITER) : form.credentialTitle;
+      const allTypes = [form.credentialType, ...additionalEntries.map((e) => e.type)];
+      const credentialTypesValue = allTypes.join(CREDENTIAL_TITLE_DELIMITER);
+      const tokenId = await issueCredential(to as `0x${string}`, {
+        ...form,
+        credentialTitle: credentialTitleValue,
+        credentialTypes: credentialTypesValue,
+      });
       setIssuedTokenId(tokenId.toString());
       setForm(defaultData);
+      setAdditionalEntries([]);
       setRecipientAddress("");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Transaction failed";
@@ -165,9 +202,30 @@ const IssueCredential = () => {
             </div>
           ) : (
             <>
-              <p className="mb-4 text-xs text-muted-foreground">
-                Connected: <span className="font-mono text-foreground">{walletAddress.slice(0, 10)}…{walletAddress.slice(-8)}</span>
-              </p>
+              <div className="mb-4 space-y-1 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 font-mono text-xs">
+                <p className="text-muted-foreground">
+                  App contract: <span className="text-foreground break-all">{HAU_VAULT_ADDRESS}</span>
+                </p>
+                <p className="text-muted-foreground">
+                  Your wallet: <span className="text-foreground break-all">{walletAddress}</span>
+                </p>
+                {contractOwner && (
+                  <p className="text-muted-foreground">
+                    Contract owner: <span className={isOwner === false ? "text-amber-600 dark:text-amber-400" : "text-foreground"}>{contractOwner}</span>
+                  </p>
+                )}
+                {isOwner === true && (
+                  <p className="text-primary font-medium">✓ You are the contract owner.</p>
+                )}
+              </div>
+              {isOwner === false && (
+                <div className="mb-4 flex gap-2 rounded-lg border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400" role="alert">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>You are not the contract owner.</strong> The addresses above are different. In your deploy tool, call <code className="rounded bg-amber-500/20 px-1">owner()</code> on the contract to see who the owner is — then connect that same wallet in MetaMask here.
+                  </div>
+                </div>
+              )}
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">Recipient wallet address</Label>
@@ -177,6 +235,9 @@ const IssueCredential = () => {
                     onChange={(e) => setRecipientAddress(e.target.value)}
                     className="font-mono text-sm"
                   />
+                  <p className="text-[11px] text-muted-foreground">
+                    If you get &quot;Contract reverted: revert&quot;, your recipient may be a smart account. Try a normal wallet address (e.g. create a new MetaMask account and use its address), or redeploy the contract with <code className="rounded bg-muted px-1">_mint</code> instead of <code className="rounded bg-muted px-1">_safeMint</code>.
+                  </p>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">Student name</Label>
@@ -184,6 +245,46 @@ const IssueCredential = () => {
                     placeholder="e.g. Juan Dela Cruz"
                     value={form.studentName}
                     onChange={(e) => setForm((f) => ({ ...f, studentName: e.target.value }))}
+                    className="text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Student number</Label>
+                  <Input
+                    placeholder="e.g. 2021-000123"
+                    value={form.studentNumber}
+                    onChange={(e) => setForm((f) => ({ ...f, studentNumber: e.target.value }))}
+                    className="text-sm"
+                  />
+                  <p className="text-[11px] text-muted-foreground">Used to search credentials by student number.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Batch</Label>
+                    <Input
+                      placeholder="e.g. 2021 — 2025"
+                      value={form.batch}
+                      onChange={(e) => setForm((f) => ({ ...f, batch: e.target.value }))}
+                      className="text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Email</Label>
+                    <Input
+                      type="email"
+                      placeholder="e.g. student@hau.edu.ph"
+                      value={form.email}
+                      onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                      className="text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Location</Label>
+                  <Input
+                    placeholder="e.g. Pampanga, Philippines"
+                    value={form.location}
+                    onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
                     className="text-sm"
                   />
                 </div>
@@ -211,6 +312,66 @@ const IssueCredential = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Additional credential titles (optional)</Label>
+                  <p className="text-[11px] text-muted-foreground">Add more titles; choose Certificate or Diploma for each.</p>
+                  <div className="space-y-2">
+                    {additionalEntries.map((entry, i) => (
+                      <div key={i} className="flex gap-2 items-center flex-wrap">
+                        <Input
+                          placeholder="e.g. Dean's Lister — Academic Excellence"
+                          value={entry.title}
+                          onChange={(e) =>
+                            setAdditionalEntries((prev) => {
+                              const next = [...prev];
+                              next[i] = { ...next[i], title: e.target.value };
+                              return next;
+                            })
+                          }
+                          className="text-sm flex-1 min-w-[180px]"
+                        />
+                        <Select
+                          value={entry.type}
+                          onValueChange={(value: "Diploma" | "Certificate") =>
+                            setAdditionalEntries((prev) => {
+                              const next = [...prev];
+                              next[i] = { ...next[i], type: value };
+                              return next;
+                            })
+                          }
+                        >
+                          <SelectTrigger className="w-[130px] text-sm shrink-0">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Diploma" className="text-sm">Diploma</SelectItem>
+                            <SelectItem value="Certificate" className="text-sm">Certificate</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="shrink-0"
+                          onClick={() => setAdditionalEntries((prev) => prev.filter((_, j) => j !== i))}
+                          aria-label="Remove title"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => setAdditionalEntries((prev) => [...prev, { title: "", type: "Certificate" }])}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add another title
+                    </Button>
+                  </div>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">Program</Label>
@@ -289,8 +450,12 @@ const IssueCredential = () => {
                     </Link>
                   </div>
                 )}
-                <Button type="submit" className="w-full gap-2" disabled={loading}>
-                  {loading ? "Issuing…" : "Issue credential"}
+                <Button
+                  type="submit"
+                  className="w-full gap-2"
+                  disabled={loading || isOwner === false}
+                >
+                  {loading ? "Issuing…" : isOwner === false ? "Connect owner wallet to issue" : "Issue credential"}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </form>

@@ -1,15 +1,32 @@
-import { createPublicClient, createWalletClient, custom, http } from "viem";
+import { BaseError, ContractFunctionRevertedError, createPublicClient, createWalletClient, custom, decodeErrorResult, http } from "viem";
 import { sepolia } from "viem/chains";
+import { HAU_VAULT_ADDRESS as CONFIG_ADDRESS } from "@/config";
 import { hauVaultAbi } from "./hauVaultAbi";
 
-export const HAU_VAULT_ADDRESS =
-  (import.meta.env.VITE_HAU_VAULT_ADDRESS as `0x${string}` | undefined) ??
-  "0x0000000000000000000000000000000000000000";
+export const HAU_VAULT_ADDRESS = CONFIG_ADDRESS;
 
 export const publicClient = createPublicClient({
   chain: sepolia,
   transport: http(),
 });
+
+/** Returns the contract owner address (only they can call issueCredential). */
+export async function getContractOwner(): Promise<`0x${string}` | null> {
+  if (HAU_VAULT_ADDRESS === "0x0000000000000000000000000000000000000000") {
+    return null;
+  }
+  try {
+    const code = await publicClient.getBytecode({ address: HAU_VAULT_ADDRESS });
+    if (!code || code === "0x") return null;
+    return publicClient.readContract({
+      address: HAU_VAULT_ADDRESS,
+      abi: hauVaultAbi,
+      functionName: "owner",
+    } as any) as Promise<`0x${string}`>;
+  } catch {
+    return null;
+  }
+}
 
 export async function readCredential(tokenId: bigint) {
   if (HAU_VAULT_ADDRESS === "0x0000000000000000000000000000000000000000") {
@@ -21,7 +38,7 @@ export async function readCredential(tokenId: bigint) {
     abi: hauVaultAbi,
     functionName: "credentials",
     args: [tokenId],
-  }) as Promise<{
+  } as any) as Promise<{
     studentName: string;
     program: string;
     institution: string;
@@ -29,19 +46,48 @@ export async function readCredential(tokenId: bigint) {
     credentialType: string;
     issuedDate: string;
     metadataURI: string;
+    studentNumber: string;
+    batch: string;
+    email: string;
+    location: string;
+    credentialTypes: string;
     active: boolean;
   }>;
+}
+
+/** Get credential token ID by student number (0 if none). */
+export async function getTokenIdByStudentNumber(studentNumber: string): Promise<bigint> {
+  if (HAU_VAULT_ADDRESS === "0x0000000000000000000000000000000000000000") {
+    return 0n;
+  }
+  try {
+    const tokenId = await publicClient.readContract({
+      address: HAU_VAULT_ADDRESS,
+      abi: hauVaultAbi,
+      functionName: "tokenIdByStudentNumber",
+      args: [studentNumber.trim()],
+    } as any);
+    return (tokenId as bigint) ?? 0n;
+  } catch {
+    return 0n;
+  }
 }
 
 /** Credential data for issuing (struct fields; active is set by contract). */
 export type IssueCredentialData = {
   studentName: string;
+  studentNumber: string;
   program: string;
   institution: string;
   credentialTitle: string;
   credentialType: string;
   issuedDate: string;
   metadataURI: string;
+  batch: string;
+  email: string;
+  location: string;
+  /** Delimiter-separated types per title (e.g. "Diploma | Certificate"). */
+  credentialTypes?: string;
 };
 
 /** Get wallet client from browser provider (e.g. MetaMask). */
@@ -66,44 +112,151 @@ export async function getConnectedAccount(): Promise<`0x${string}`> {
   return address;
 }
 
+/** Turn viem revert errors into a clear user-facing message. */
+function normalizeRevertError(simErr: unknown): Error {
+  // Try to get raw revert data from the error (viem sometimes exposes it)
+  const errWithData = simErr as { data?: `0x${string}`; cause?: { data?: `0x${string}` } };
+  const revertData = errWithData?.data ?? errWithData?.cause?.data;
+  if (revertData && revertData.startsWith("0x") && revertData.length > 10) {
+    try {
+      const decoded = decodeErrorResult({ abi: hauVaultAbi, data: revertData });
+      const name = decoded.errorName;
+      const args = decoded.args;
+      if (name === "OwnableUnauthorizedAccount") {
+        return new Error(
+          "Only the contract owner can issue credentials. Connect the same MetaMask account that deployed the contract in Remix."
+        );
+      }
+      if (name === "ERC721InvalidReceiver") {
+        return new Error(
+          "The contract uses _safeMint but the recipient address does not accept NFTs. Redeploy the contract with _mint(to, tokenId) instead of _safeMint in Remix, then update src/config.ts with the new address."
+        );
+      }
+      if (name === "Error" && args && typeof (args as unknown as { message?: string }).message === "string") {
+        return new Error(`Contract reverted: ${(args as unknown as { message: string }).message}`);
+      }
+      return new Error(`Contract reverted: ${name}${args ? ` (${JSON.stringify(args)})` : ""}`);
+    } catch {
+      // decodeErrorResult failed, fall through to generic handling
+    }
+  }
+
+  const revertErr =
+    simErr instanceof BaseError
+      ? simErr.walk((e) => e instanceof ContractFunctionRevertedError)
+      : undefined;
+  if (revertErr instanceof ContractFunctionRevertedError) {
+    const err = revertErr as unknown as { errorName?: string; name?: string; errorArgs?: unknown; args?: unknown; data?: `0x${string}` };
+    const name = err.errorName ?? err.name ?? "revert";
+    const args = err.errorArgs ?? err.args;
+    if (name === "OwnableUnauthorizedAccount" && args && typeof (args as { account?: string }).account === "string") {
+      return new Error(
+        "Only the contract owner can issue credentials. Connect the same MetaMask account that deployed the contract in Remix."
+      );
+    }
+    if (name === "ERC721InvalidReceiver") {
+      return new Error(
+        "The contract uses _safeMint but the recipient does not accept NFTs. Redeploy with _mint(to, tokenId) in Remix and update src/config.ts."
+      );
+    }
+    const isGenericRevert =
+      name === "revert" || name === "ContractFunctionRevertedError";
+    const hint = isGenericRevert
+      ? "The contract may still use _safeMint (minting to a smart account fails). In Remix use _mint(to, tokenId), recompile, redeploy, and set the new address in src/config.ts. Or try issuing to a different wallet (e.g. a new MetaMask account)."
+      : args
+        ? ` (${JSON.stringify(args)})`
+        : "";
+    return new Error(
+      isGenericRevert ? hint : `Contract reverted: ${name}${hint}`
+    );
+  }
+  const msg = simErr instanceof Error ? simErr.message : String(simErr);
+  if (msg.includes("ContractFunctionRevertedError") || msg.includes("revert")) {
+    return new Error(
+      "Transaction reverted. The contract may still use _safeMint. In Remix use _mint(to, tokenId), recompile, redeploy, and update src/config.ts with the new contract address."
+    );
+  }
+  if (msg.includes("Ownable") || msg.includes("owner") || msg.includes("caller")) {
+    return new Error(
+      "Only the contract owner can issue credentials. Connect the same MetaMask account that deployed the contract in Remix."
+    );
+  }
+  return simErr instanceof Error ? simErr : new Error(String(simErr));
+}
+
 /** Issue a credential on-chain. Caller must be contract owner. */
 export async function issueCredential(
   recipientAddress: `0x${string}`,
   data: IssueCredentialData
 ): Promise<bigint> {
   if (HAU_VAULT_ADDRESS === "0x0000000000000000000000000000000000000000") {
-    throw new Error("Contract address not configured. Add VITE_HAU_VAULT_ADDRESS to your .env file.");
+    throw new Error("Contract address not configured. Set it in src/config.ts.");
   }
   const client = getWalletClient();
   const address = await getConnectedAccount();
 
-  const hash = await client.writeContract({
-    address: HAU_VAULT_ADDRESS,
-    abi: hauVaultAbi,
-    functionName: "issueCredential",
-    args: [
-      recipientAddress,
-      [
-        data.studentName,
-        data.program,
-        data.institution,
-        data.credentialTitle,
-        data.credentialType,
-        data.issuedDate,
-        data.metadataURI || "",
-      ],
+  const code = await publicClient.getBytecode({ address: HAU_VAULT_ADDRESS });
+  if (!code || code === "0x") {
+    throw new Error(
+      "The configured address is a wallet, not a contract. In Remix, copy the address under “Deployed Contracts” (the contract name), not your Account address."
+    );
+  }
+
+  const args = [
+    recipientAddress,
+    [
+      data.studentName,
+      data.program,
+      data.institution,
+      data.credentialTitle,
+      data.credentialType,
+      data.issuedDate,
+      data.metadataURI || "",
+      data.studentNumber || "",
+      data.batch || "",
+      data.email || "",
+      data.location || "",
+      data.credentialTypes ?? "",
+      true, // active – contract overwrites with true, but ABI requires last field
     ],
-    account: address,
-    gas: 2_000_000n,
-  });
+  ] as const;
+
+  try {
+    await publicClient.simulateContract({
+      address: HAU_VAULT_ADDRESS,
+      abi: hauVaultAbi,
+      functionName: "issueCredential",
+      args: args as any,
+      account: address,
+    } as any);
+  } catch (simErr: unknown) {
+    throw normalizeRevertError(simErr);
+  }
+
+  let hash: `0x${string}`;
+  try {
+    hash = await client.writeContract({
+      address: HAU_VAULT_ADDRESS,
+      abi: hauVaultAbi,
+      functionName: "issueCredential",
+      args: args as any,
+      account: address,
+      gas: 2_000_000n,
+    } as any);
+  } catch (writeErr: unknown) {
+    throw normalizeRevertError(writeErr);
+  }
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  if (receipt.status !== "success") throw new Error("Transaction failed.");
+  if (receipt.status !== "success") {
+    throw new Error(
+      "Transaction reverted on-chain. The contract may still use _safeMint. In Remix change to _mint(to, tokenId), recompile, redeploy, and update the address in src/config.ts."
+    );
+  }
   const tokenId = await publicClient.readContract({
     address: HAU_VAULT_ADDRESS,
     abi: hauVaultAbi,
     functionName: "totalSupply",
-  });
+  } as any);
   return tokenId as bigint;
 }
-
