@@ -22,7 +22,13 @@ export async function uploadImageToCloudinary(file: File): Promise<string | null
   const res = await fetch(url, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err as { error?: { message?: string } }).error?.message || `Upload failed: ${res.status}`);
+    const msg = (err as { error?: { message?: string } }).error?.message || `Upload failed: ${res.status}`;
+    if (/unknown api key|invalid credentials|upload preset/i.test(msg)) {
+      throw new Error(
+        "Cloudinary error: check VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET in .env. Use your cloud name from the dashboard and an unsigned upload preset. Restart the dev server after changing .env."
+      );
+    }
+    throw new Error(msg);
   }
   const data = (await res.json()) as { secure_url?: string };
   return data.secure_url || null;
