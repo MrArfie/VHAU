@@ -11,7 +11,8 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { getAllCredentialSummaries, readCredential, updateCredential, getConnectedAccount, getIsIssuer, getContractOwner, type CredentialSummary, type IssueCredentialData } from "@/lib/ethereum";
-import { CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY } from "@/lib/utils";
+import { CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY, saveImageToLocalStorage, parseMetadataURIImages, buildMetadataURIImages } from "@/lib/utils";
+import { isCloudinaryConfigured, uploadImageToCloudinary } from "@/lib/cloudinary";
 import { Eye, Pencil, Loader2 } from "lucide-react";
 
 const CredentialList = () => {
@@ -133,37 +134,53 @@ const CredentialList = () => {
     setSaveError(null);
     setSaving(true);
     const tokenIdStr = editTokenId.toString();
+    let formToSave = editForm;
     try {
-      if (editProfileFile) {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result as string);
-          r.onerror = () => reject(new Error("Failed to read file"));
-          r.readAsDataURL(editProfileFile);
-        });
-        if (dataUrl.length <= 4_500_000) localStorage.setItem(PROFILE_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl);
+      if (isCloudinaryConfigured() && (editProfileFile || editDiplomaFile)) {
+        const existing = parseMetadataURIImages(initialEditForm?.metadataURI ?? "");
+        let profileUrl: string | null = existing.profileImageUrl ?? null;
+        let diplomaUrl: string | null = existing.diplomaImageUrl ?? null;
+        if (editProfileFile) {
+          const url = await uploadImageToCloudinary(editProfileFile);
+          if (url) profileUrl = url;
+        }
+        if (editDiplomaFile) {
+          const url = await uploadImageToCloudinary(editDiplomaFile);
+          if (url) diplomaUrl = url;
+        }
+        formToSave = { ...editForm, metadataURI: buildMetadataURIImages(profileUrl, diplomaUrl) };
+      } else {
+        if (editProfileFile) {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result as string);
+            r.onerror = () => reject(new Error("Failed to read file"));
+            r.readAsDataURL(editProfileFile);
+          });
+          await saveImageToLocalStorage(PROFILE_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl, editProfileFile);
+        }
+        if (editDiplomaFile) {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result as string);
+            r.onerror = () => reject(new Error("Failed to read file"));
+            r.readAsDataURL(editDiplomaFile);
+          });
+          await saveImageToLocalStorage(CREDENTIAL_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl, editDiplomaFile);
+        }
       }
-      if (editDiplomaFile) {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result as string);
-          r.onerror = () => reject(new Error("Failed to read file"));
-          r.readAsDataURL(editDiplomaFile);
-        });
-        if (dataUrl.length <= 4_500_000) localStorage.setItem(CREDENTIAL_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl);
-      }
-      const onlyImages = !formChanged(editForm, initialEditForm);
+      const onlyImages = !formChanged(formToSave, initialEditForm);
       if (!onlyImages) {
-        await updateCredential(editTokenId, editForm);
+        await updateCredential(editTokenId, formToSave);
         setList((prev) =>
           prev.map((item) =>
             item.tokenId === editTokenId
               ? {
                   ...item,
-                  studentName: editForm.studentName,
-                  studentNumber: editForm.studentNumber,
-                  credentialTitle: editForm.credentialTitle,
-                  active: editForm.active,
+                  studentName: formToSave.studentName,
+                  studentNumber: formToSave.studentNumber,
+                  credentialTitle: formToSave.credentialTitle,
+                  active: formToSave.active,
                 }
               : item
           )

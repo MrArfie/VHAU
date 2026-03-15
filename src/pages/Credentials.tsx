@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, User, Search, ArrowLeft, Mail, Calendar, MapPin, GraduationCap, Award } from "lucide-react";
 import { readCredential, getTokenIdByStudentNumber } from "@/lib/ethereum";
-import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY } from "@/lib/utils";
+import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY, parseMetadataURIImages } from "@/lib/utils";
 
 interface Credential {
   title: string;
@@ -26,7 +26,9 @@ interface StudentProfile {
   walletAddress: string;
   tokenId: string;
   credentials: Credential[];
-  /** URL for diploma/credential image (from metadataURI when issuing). */
+  /** Profile/avatar image URL (from metadataURI or localStorage). */
+  profileImageUrl?: string;
+  /** Diploma/credential document image URL (from metadataURI or localStorage). */
   diplomaImageUrl?: string;
 }
 
@@ -110,7 +112,7 @@ const Credentials = () => {
         const location = (raw?.location ?? raw?.[10] ?? "") as string;
         const active = (raw?.active ?? raw?.[12] ?? false) as boolean;
         const metadataURI = (raw?.metadataURI ?? "") as string;
-        const diplomaImageUrl = metadataURI && (metadataURI.startsWith("http://") || metadataURI.startsWith("https://")) ? metadataURI : undefined;
+        const { profileImageUrl: fromMetaProfile, diplomaImageUrl: fromMetaDiploma } = parseMetadataURIImages(metadataURI);
         const titleStrings = (credentialTitle || "On-chain Credential").split(CREDENTIAL_TITLE_DELIMITER).map((t) => t.trim()).filter(Boolean);
         const typeStrings = (credentialTypes || "").split(CREDENTIAL_TITLE_DELIMITER).map((t) => t.trim()).filter(Boolean);
         const defaultCredType: "diploma" | "certificate" = String(credentialType).toLowerCase().includes("diploma") ? "diploma" : "certificate";
@@ -136,7 +138,8 @@ const Credentials = () => {
           walletAddress: "0x…",
           tokenId: `#${tokenFromUrl}`,
           credentials: credentialsList,
-          diplomaImageUrl,
+          profileImageUrl: fromMetaProfile,
+          diplomaImageUrl: fromMetaDiploma,
         });
         setSearched(true);
       })
@@ -203,7 +206,7 @@ const Credentials = () => {
         const location = (raw?.location ?? raw?.[10] ?? "") as string;
         const active = (raw?.active ?? raw?.[12] ?? false) as boolean;
         const metadataURI = (raw?.metadataURI ?? "") as string;
-        const diplomaImageUrl = metadataURI && (metadataURI.startsWith("http://") || metadataURI.startsWith("https://")) ? metadataURI : undefined;
+        const { profileImageUrl: fromMetaProfile, diplomaImageUrl: fromMetaDiploma } = parseMetadataURIImages(metadataURI);
 
         const titleStrings = (credentialTitle || "On-chain Credential")
             .split(CREDENTIAL_TITLE_DELIMITER)
@@ -245,7 +248,8 @@ const Credentials = () => {
           walletAddress: "0x…",
           tokenId: `#${tokenIdToUse.toString()}`,
           credentials: credentialsList,
-          diplomaImageUrl,
+          profileImageUrl: fromMetaProfile,
+          diplomaImageUrl: fromMetaDiploma,
         };
 
         setProfile(chainProfile);
@@ -309,7 +313,8 @@ const Credentials = () => {
               {/* Avatar */}
               {(() => {
                 const numericTokenId = profile.tokenId.replace(/^#/, "");
-                const profileImageUrl = typeof localStorage !== "undefined" ? localStorage.getItem(PROFILE_IMAGE_STORAGE_KEY + numericTokenId) : null;
+                const localProfile = typeof localStorage !== "undefined" ? localStorage.getItem(PROFILE_IMAGE_STORAGE_KEY + numericTokenId) : null;
+                const profileImageUrl = profile.profileImageUrl || localProfile;
                 return (
                   <div className="w-28 h-28 rounded-full bg-secondary flex items-center justify-center mb-4 overflow-hidden shrink-0 relative">
                     {profileImageUrl ? (
@@ -371,7 +376,7 @@ const Credentials = () => {
             {(() => {
               const numericTokenId = profile.tokenId.replace(/^#/, "");
               const localImageUrl = typeof localStorage !== "undefined" ? localStorage.getItem(CREDENTIAL_IMAGE_STORAGE_KEY + numericTokenId) : null;
-              const imageUrl = localImageUrl || profile.diplomaImageUrl;
+              const imageUrl = profile.diplomaImageUrl || localImageUrl;
               return (
                 <div className="mt-8 mx-4 sm:mx-6">
                   <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground uppercase mb-3 text-center">

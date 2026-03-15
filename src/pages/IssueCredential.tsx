@@ -11,7 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getConnectedAccount, getContractOwner, getIsIssuer, issueCredential, addIssuer, removeIssuer, HAU_VAULT_ADDRESS, type IssueCredentialData } from "@/lib/ethereum";
-import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY } from "@/lib/utils";
+import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY, saveImageToLocalStorage, buildMetadataURIImages } from "@/lib/utils";
+import { isCloudinaryConfigured, uploadImageToCloudinary } from "@/lib/cloudinary";
 import { Wallet, CheckCircle, ArrowRight, AlertTriangle, Plus, X, ImagePlus, List } from "lucide-react";
 
 /** Credential titles and their specializations/programs (for dropdowns). */
@@ -175,6 +176,24 @@ const IssueCredential = () => {
 
     setLoading(true);
     try {
+      let metadataURI = form.metadataURI || "";
+      if (isCloudinaryConfigured() && (diplomaFile || profilePhotoFile)) {
+        let profileUrl: string | null = null;
+        let diplomaUrl: string | null = null;
+        if (profilePhotoFile) {
+          profileUrl = await uploadImageToCloudinary(profilePhotoFile);
+          if (!profileUrl) setError("Failed to upload profile photo to cloud.");
+        }
+        if (diplomaFile) {
+          diplomaUrl = await uploadImageToCloudinary(diplomaFile);
+          if (!diplomaUrl) setError("Failed to upload diploma image to cloud.");
+        }
+        if ((profilePhotoFile && !profileUrl) || (diplomaFile && !diplomaUrl)) {
+          setLoading(false);
+          return;
+        }
+        metadataURI = buildMetadataURIImages(profileUrl, diplomaUrl);
+      }
       const allTitles = [form.credentialTitle, ...additionalEntries.map((e) => e.title)].filter(Boolean);
       const credentialTitleValue = allTitles.length ? allTitles.join(CREDENTIAL_TITLE_DELIMITER) : form.credentialTitle;
       const allTypes = [form.credentialType, ...additionalEntries.map((e) => e.type)];
@@ -183,42 +202,44 @@ const IssueCredential = () => {
         ...form,
         credentialTitle: credentialTitleValue,
         credentialTypes: credentialTypesValue,
+        metadataURI,
       });
       const tokenIdStr = tokenId.toString();
-      if (diplomaFile) {
-        try {
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const r = new FileReader();
-            r.onload = () => resolve(r.result as string);
-            r.onerror = () => reject(new Error("Failed to read file"));
-            r.readAsDataURL(diplomaFile);
-          });
-          if (dataUrl.length > 4_500_000) {
-            console.warn("Diploma image too large for local storage (~5MB limit); not saved.");
-          } else {
-            localStorage.setItem(CREDENTIAL_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl);
+      if (!isCloudinaryConfigured()) {
+        if (diplomaFile) {
+          try {
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const r = new FileReader();
+              r.onload = () => resolve(r.result as string);
+              r.onerror = () => reject(new Error("Failed to read file"));
+              r.readAsDataURL(diplomaFile);
+            });
+            await saveImageToLocalStorage(CREDENTIAL_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl, diplomaFile);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Could not save diploma image in this browser.");
+            setLoading(false);
+            return;
           }
-        } catch (err) {
-          console.warn("Could not save diploma image locally:", err);
+          setDiplomaFile(null);
         }
+        if (profilePhotoFile) {
+          try {
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const r = new FileReader();
+              r.onload = () => resolve(r.result as string);
+              r.onerror = () => reject(new Error("Failed to read file"));
+              r.readAsDataURL(profilePhotoFile);
+            });
+            await saveImageToLocalStorage(PROFILE_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl, profilePhotoFile);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Could not save profile photo in this browser.");
+            setLoading(false);
+            return;
+          }
+          setProfilePhotoFile(null);
+        }
+      } else {
         setDiplomaFile(null);
-      }
-      if (profilePhotoFile) {
-        try {
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const r = new FileReader();
-            r.onload = () => resolve(r.result as string);
-            r.onerror = () => reject(new Error("Failed to read file"));
-            r.readAsDataURL(profilePhotoFile);
-          });
-          if (dataUrl.length > 4_500_000) {
-            console.warn("Profile photo too large for local storage (~5MB limit); not saved.");
-          } else {
-            localStorage.setItem(PROFILE_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl);
-          }
-        } catch (err) {
-          console.warn("Could not save profile photo locally:", err);
-        }
         setProfilePhotoFile(null);
       }
       setIssuedTokenId(tokenIdStr);
