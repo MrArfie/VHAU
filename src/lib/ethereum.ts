@@ -105,6 +105,97 @@ export async function readCredential(tokenId: bigint) {
   }>;
 }
 
+/** Get total number of credentials minted. */
+export async function getTotalSupply(): Promise<bigint> {
+  if (HAU_VAULT_ADDRESS === "0x0000000000000000000000000000000000000000") {
+    return 0n;
+  }
+  try {
+    const total = await publicClient.readContract({
+      address: HAU_VAULT_ADDRESS,
+      abi: hauVaultAbi,
+      functionName: "totalSupply",
+    } as any);
+    return (total as bigint) ?? 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+/** Summary of a credential for list views. */
+export type CredentialSummary = {
+  tokenId: bigint;
+  studentName: string;
+  studentNumber: string;
+  credentialTitle: string;
+  active: boolean;
+};
+
+/** Fetch summaries for all credentials (token IDs 1 to totalSupply). */
+export async function getAllCredentialSummaries(): Promise<CredentialSummary[]> {
+  const total = await getTotalSupply();
+  if (total === 0n) return [];
+  const list: CredentialSummary[] = [];
+  for (let i = 1n; i <= total; i++) {
+    try {
+      const cred = await readCredential(i);
+      list.push({
+        tokenId: i,
+        studentName: (cred as any).studentName ?? "",
+        studentNumber: (cred as any).studentNumber ?? "",
+        credentialTitle: (cred as any).credentialTitle ?? "",
+        active: (cred as any).active ?? false,
+      });
+    } catch {
+      list.push({
+        tokenId: i,
+        studentName: "",
+        studentNumber: "",
+        credentialTitle: "",
+        active: false,
+      });
+    }
+  }
+  return list;
+}
+
+/** Update an existing credential (owner or issuer). */
+export async function updateCredential(
+  tokenId: bigint,
+  data: IssueCredentialData & { active: boolean }
+): Promise<void> {
+  const walletClient = getWalletClient();
+  const [address] = await walletClient.getAddresses();
+  if (!address) throw new Error("Connect your wallet first.");
+  const args = [
+    tokenId,
+    [
+      data.studentName,
+      data.program,
+      data.institution,
+      data.credentialTitle,
+      data.credentialType,
+      data.issuedDate,
+      data.metadataURI || "",
+      data.studentNumber || "",
+      data.batch || "",
+      data.email || "",
+      data.location || "",
+      data.credentialTypes ?? "",
+      data.active,
+    ],
+  ] as const;
+  const hash = await walletClient.writeContract({
+    address: HAU_VAULT_ADDRESS,
+    abi: hauVaultAbi,
+    functionName: "updateCredential",
+    args: args as any,
+    account: address,
+    gas: 2_000_000n,
+  } as any);
+  await publicClient.waitForTransactionReceipt({ hash });
+}
+
 /** Get credential token ID by student number (0 if none). */
 export async function getTokenIdByStudentNumber(studentNumber: string): Promise<bigint> {
   if (HAU_VAULT_ADDRESS === "0x0000000000000000000000000000000000000000") {

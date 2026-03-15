@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, User, Search, ArrowLeft, Mail, Calendar, MapPin, GraduationCap, Award } from "lucide-react";
 import { readCredential, getTokenIdByStudentNumber } from "@/lib/ethereum";
-import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY } from "@/lib/utils";
+import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY } from "@/lib/utils";
 
 interface Credential {
   title: string;
@@ -71,6 +72,7 @@ const mockProfile: StudentProfile = {
 };
 
 const Credentials = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [username, setUsername] = useState("");
   const [course, setCourse] = useState("");
   const [studentId, setStudentId] = useState("");
@@ -79,6 +81,77 @@ const Credentials = () => {
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const tokenFromUrl = searchParams.get("token");
+  useEffect(() => {
+    if (tokenFromUrl && tokenFromUrl.trim() !== "" && !isNaN(Number(tokenFromUrl))) {
+      setStudentId(tokenFromUrl.trim());
+    }
+  }, [tokenFromUrl]);
+
+  useEffect(() => {
+    if (!tokenFromUrl || isNaN(Number(tokenFromUrl)) || Number(tokenFromUrl) < 1) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    readCredential(BigInt(tokenFromUrl))
+      .then((onchain) => {
+        if (cancelled) return;
+        const raw = onchain as Record<string, unknown>;
+        const credentialType = (raw?.credentialType ?? raw?.[4] ?? "") as string;
+        const credentialTypes = (raw?.credentialTypes ?? raw?.[11] ?? "") as string;
+        const studentName = (raw?.studentName ?? raw?.[0] ?? "") as string;
+        const program = (raw?.program ?? raw?.[1] ?? "") as string;
+        const institution = (raw?.institution ?? raw?.[2] ?? "") as string;
+        const credentialTitle = (raw?.credentialTitle ?? raw?.[3] ?? "") as string;
+        const issuedDate = (raw?.issuedDate ?? raw?.[6] ?? "") as string;
+        const batch = (raw?.batch ?? raw?.[8] ?? "") as string;
+        const email = (raw?.email ?? raw?.[9] ?? "") as string;
+        const location = (raw?.location ?? raw?.[10] ?? "") as string;
+        const active = (raw?.active ?? raw?.[12] ?? false) as boolean;
+        const metadataURI = (raw?.metadataURI ?? "") as string;
+        const diplomaImageUrl = metadataURI && (metadataURI.startsWith("http://") || metadataURI.startsWith("https://")) ? metadataURI : undefined;
+        const titleStrings = (credentialTitle || "On-chain Credential").split(CREDENTIAL_TITLE_DELIMITER).map((t) => t.trim()).filter(Boolean);
+        const typeStrings = (credentialTypes || "").split(CREDENTIAL_TITLE_DELIMITER).map((t) => t.trim()).filter(Boolean);
+        const defaultCredType: "diploma" | "certificate" = String(credentialType).toLowerCase().includes("diploma") ? "diploma" : "certificate";
+        const getTypeForIndex = (i: number): "diploma" | "certificate" =>
+          typeStrings[i] && String(typeStrings[i]).toLowerCase().includes("diploma") ? "diploma" : "certificate";
+        const credentialsList: Credential[] =
+          titleStrings.length > 0
+            ? titleStrings.map((title, i) => ({
+                title,
+                type: typeStrings[i] !== undefined && typeStrings[i] !== "" ? getTypeForIndex(i) : defaultCredType,
+                institution: institution || "Holy Angel University",
+                date: issuedDate || "",
+                verified: active,
+              }))
+            : [{ title: "On-chain Credential", type: defaultCredType, institution: institution || "Holy Angel University", date: issuedDate || "", verified: active }];
+        setProfile({
+          name: studentName || "Student",
+          degree: program || "Program",
+          batch: batch || "Batch 2021 — 2025",
+          email: email || "onchain@hau.edu",
+          dateIssued: issuedDate || "On-chain record",
+          location: location || "On-chain",
+          walletAddress: "0x…",
+          tokenId: `#${tokenFromUrl}`,
+          credentials: credentialsList,
+          diplomaImageUrl,
+        });
+        setSearched(true);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load credential");
+          setProfile(null);
+          setSearched(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [tokenFromUrl]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -234,9 +307,30 @@ const Credentials = () => {
                 On‑chain academic profile
               </p>
               {/* Avatar */}
-              <div className="w-28 h-28 rounded-full bg-secondary flex items-center justify-center mb-4">
-                <User className="w-14 h-14 text-muted-foreground/50" />
-              </div>
+              {(() => {
+                const numericTokenId = profile.tokenId.replace(/^#/, "");
+                const profileImageUrl = typeof localStorage !== "undefined" ? localStorage.getItem(PROFILE_IMAGE_STORAGE_KEY + numericTokenId) : null;
+                return (
+                  <div className="w-28 h-28 rounded-full bg-secondary flex items-center justify-center mb-4 overflow-hidden shrink-0 relative">
+                    {profileImageUrl ? (
+                      <img
+                        src={profileImageUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                          const fallback = e.currentTarget.parentElement?.querySelector(".profile-avatar-fallback");
+                          if (fallback instanceof HTMLElement) fallback.classList.remove("hidden");
+                        }}
+                      />
+                    ) : null}
+                    <div className={`profile-avatar-fallback absolute inset-0 flex items-center justify-center bg-secondary ${profileImageUrl ? "hidden" : ""}`}>
+                      <User className="w-14 h-14 text-muted-foreground/50" />
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Name */}
               <h1 className="text-3xl font-semibold text-foreground leading-tight tracking-tight">

@@ -11,8 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getConnectedAccount, getContractOwner, getIsIssuer, issueCredential, addIssuer, removeIssuer, HAU_VAULT_ADDRESS, type IssueCredentialData } from "@/lib/ethereum";
-import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY } from "@/lib/utils";
-import { Wallet, CheckCircle, ArrowRight, AlertTriangle, Plus, X, ImagePlus } from "lucide-react";
+import { CREDENTIAL_TITLE_DELIMITER, CREDENTIAL_IMAGE_STORAGE_KEY, PROFILE_IMAGE_STORAGE_KEY } from "@/lib/utils";
+import { Wallet, CheckCircle, ArrowRight, AlertTriangle, Plus, X, ImagePlus, List } from "lucide-react";
 
 /** Credential titles and their specializations/programs (for dropdowns). */
 const CREDENTIAL_TITLE_TO_PROGRAMS: Record<string, string[]> = {
@@ -96,6 +96,7 @@ const IssueCredential = () => {
   const [issuerActionLoading, setIssuerActionLoading] = useState(false);
   const [issuerActionError, setIssuerActionError] = useState<string | null>(null);
   const [diplomaFile, setDiplomaFile] = useState<File | null>(null);
+  const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +203,24 @@ const IssueCredential = () => {
         }
         setDiplomaFile(null);
       }
+      if (profilePhotoFile) {
+        try {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result as string);
+            r.onerror = () => reject(new Error("Failed to read file"));
+            r.readAsDataURL(profilePhotoFile);
+          });
+          if (dataUrl.length > 4_500_000) {
+            console.warn("Profile photo too large for local storage (~5MB limit); not saved.");
+          } else {
+            localStorage.setItem(PROFILE_IMAGE_STORAGE_KEY + tokenIdStr, dataUrl);
+          }
+        } catch (err) {
+          console.warn("Could not save profile photo locally:", err);
+        }
+        setProfilePhotoFile(null);
+      }
       setIssuedTokenId(tokenIdStr);
       setForm(defaultData);
       setAdditionalEntries([]);
@@ -229,6 +248,14 @@ const IssueCredential = () => {
             <p className="mt-1 text-xs text-muted-foreground">
               Connect the contract owner or an authorized issuer wallet on Sepolia. You need Sepolia ETH for gas. Only the owner or members added as issuers can issue credentials.
             </p>
+            {walletAddress && canIssue && (
+              <Button variant="outline" size="sm" className="mt-4 gap-2" asChild>
+                <Link to="/credentials/list">
+                  <List className="h-4 w-4" />
+                  View all credentials
+                </Link>
+              </Button>
+            )}
           </header>
 
           {!walletAddress ? (
@@ -545,6 +572,36 @@ const IssueCredential = () => {
                   </div>
                   <p className="text-[11px] text-muted-foreground">
                     Upload from your device. Image is stored in this browser only and will show on the credential profile when viewed on this device. For a permanent URL (any device), use Metadata URI above with an image link.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Profile photo (optional)</Label>
+                  <div className="flex gap-2 items-center flex-wrap">
+                    <Input
+                      type="file"
+                      accept="image/*"
+                      className="text-sm max-w-[240px]"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        setProfilePhotoFile(f || null);
+                      }}
+                    />
+                    {profilePhotoFile && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        {profilePhotoFile.name}
+                        <button
+                          type="button"
+                          onClick={() => setProfilePhotoFile(null)}
+                          className="text-destructive hover:underline ml-1"
+                        >
+                          Remove
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Shows in the circular avatar on the student&apos;s profile. Stored in this browser only.
                   </p>
                 </div>
                 {error && (

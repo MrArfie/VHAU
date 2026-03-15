@@ -105,7 +105,14 @@ contract HAUVaultCredentials is ERC721Enumerable, Ownable {
         c.email = data.email;
         c.location = data.location;
         c.credentialTypes = data.credentialTypes;
-        c.active = true;
+        c.active = data.active;
+    }
+
+    function updateCredential(uint256 tokenId, Credential calldata data) external onlyOwnerOrIssuer {
+        require(_ownerOf(tokenId) != address(0), "Invalid token");
+        _saveCredentialPart1(tokenId, data);
+        _saveCredentialPart2(tokenId, data);
+        tokenIdByStudentNumber[data.studentNumber] = tokenId;
     }
 
     function revokeCredential(uint256 tokenId) external onlyOwner {

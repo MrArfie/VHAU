@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "./components/Layout";
 import Home from "./pages/Home";
 import Credentials from "./pages/Credentials";
+import CredentialList from "./pages/CredentialList";
 import IssueCredential from "./pages/IssueCredential";
 import NotFound from "./pages/NotFound";
 
@@ -21,6 +22,7 @@ const App = () => (
           <Route element={<Layout />}>
             <Route path="/" element={<Home />} />
             <Route path="/credentials" element={<Credentials />} />
+            <Route path="/credentials/list" element={<CredentialList />} />
             <Route path="/issue" element={<IssueCredential />} />
             <Route path="*" element={<NotFound />} />
           </Route>

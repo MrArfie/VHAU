@@ -10,3 +10,6 @@ export const CREDENTIAL_TITLE_DELIMITER = " | ";
 
 /** localStorage key for diploma image uploaded from device (keyed by tokenId). */
 export const CREDENTIAL_IMAGE_STORAGE_KEY = "credentialImage_";
+
+/** localStorage key for profile/avatar image (keyed by tokenId). */
+export const PROFILE_IMAGE_STORAGE_KEY = "profileImage_";
