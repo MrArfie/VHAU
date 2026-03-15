@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getConnectedAccount, getContractOwner, issueCredential, HAU_VAULT_ADDRESS, type IssueCredentialData } from "@/lib/ethereum";
+import { getConnectedAccount, getContractOwner, getIsIssuer, issueCredential, addIssuer, removeIssuer, HAU_VAULT_ADDRESS, type IssueCredentialData } from "@/lib/ethereum";
 import { CREDENTIAL_TITLE_DELIMITER } from "@/lib/utils";
 import { Wallet, CheckCircle, ArrowRight, AlertTriangle, Plus, X } from "lucide-react";
 
@@ -88,9 +88,13 @@ const IssueCredential = () => {
   const [recipientAddress, setRecipientAddress] = useState("");
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [contractOwner, setContractOwner] = useState<string | null>(null);
+  const [isIssuer, setIsIssuer] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [issuedTokenId, setIssuedTokenId] = useState<string | null>(null);
+  const [issuerAddress, setIssuerAddress] = useState("");
+  const [issuerActionLoading, setIssuerActionLoading] = useState(false);
+  const [issuerActionError, setIssuerActionError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,10 +106,25 @@ const IssueCredential = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!walletAddress) {
+      setIsIssuer(null);
+      return;
+    }
+    let cancelled = false;
+    getIsIssuer(walletAddress).then((ok) => {
+      if (!cancelled) setIsIssuer(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [walletAddress]);
+
   const isOwner =
     walletAddress && contractOwner
       ? walletAddress.toLowerCase() === contractOwner.toLowerCase()
       : null;
+  const canIssue = isOwner === true || isIssuer === true;
 
   const handleConnect = async () => {
     setError(null);
@@ -188,7 +207,7 @@ const IssueCredential = () => {
               Issue on-chain credential
             </h1>
             <p className="mt-1 text-xs text-muted-foreground">
-              Connect the contract owner wallet on Sepolia. You need Sepolia ETH for gas. Only the contract owner can issue credentials.
+              Connect the contract owner or an authorized issuer wallet on Sepolia. You need Sepolia ETH for gas. Only the owner or members added as issuers can issue credentials.
             </p>
           </header>
 
@@ -202,28 +221,67 @@ const IssueCredential = () => {
             </div>
           ) : (
             <>
-              <div className="mb-4 space-y-1 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 font-mono text-xs">
-                <p className="text-muted-foreground">
-                  App contract: <span className="text-foreground break-all">{HAU_VAULT_ADDRESS}</span>
-                </p>
-                <p className="text-muted-foreground">
-                  Your wallet: <span className="text-foreground break-all">{walletAddress}</span>
-                </p>
-                {contractOwner && (
-                  <p className="text-muted-foreground">
-                    Contract owner: <span className={isOwner === false ? "text-amber-600 dark:text-amber-400" : "text-foreground"}>{contractOwner}</span>
-                  </p>
-                )}
-                {isOwner === true && (
-                  <p className="text-primary font-medium">✓ You are the contract owner.</p>
-                )}
-              </div>
-              {isOwner === false && (
+              {walletAddress && !canIssue && (
                 <div className="mb-4 flex gap-2 rounded-lg border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400" role="alert">
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                   <div>
-                    <strong>You are not the contract owner.</strong> The addresses above are different. In your deploy tool, call <code className="rounded bg-amber-500/20 px-1">owner()</code> on the contract to see who the owner is — then connect that same wallet in MetaMask here.
+                    <strong>You cannot issue credentials.</strong> Only the contract owner or an address added as an issuer can issue. Ask the owner to add your wallet address as an issuer.
                   </div>
+                </div>
+              )}
+              {isOwner && (
+                <div className="mb-4 rounded-lg border border-border/60 bg-muted/20 px-4 py-3 space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Manage issuers</p>
+                  <p className="text-[11px] text-muted-foreground">Add a member&apos;s wallet address so they can issue credentials. Only you (the owner) can add or remove issuers.</p>
+                  <div className="flex gap-2 flex-wrap items-center">
+                    <Input
+                      placeholder="0x..."
+                      value={issuerAddress}
+                      onChange={(e) => { setIssuerAddress(e.target.value); setIssuerActionError(null); }}
+                      className="font-mono text-sm max-w-[320px]"
+                    />
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      disabled={issuerActionLoading || !/^0x[a-fA-F0-9]{40}$/.test(issuerAddress.trim())}
+                      onClick={async () => {
+                        setIssuerActionError(null);
+                        setIssuerActionLoading(true);
+                        try {
+                          await addIssuer(issuerAddress.trim() as `0x${string}`);
+                          setIssuerAddress("");
+                        } catch (e) {
+                          setIssuerActionError(e instanceof Error ? e.message : "Failed to add issuer");
+                        } finally {
+                          setIssuerActionLoading(false);
+                        }
+                      }}
+                    >
+                      {issuerActionLoading ? "Adding…" : "Add issuer"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={issuerActionLoading || !/^0x[a-fA-F0-9]{40}$/.test(issuerAddress.trim())}
+                      onClick={async () => {
+                        setIssuerActionError(null);
+                        setIssuerActionLoading(true);
+                        try {
+                          await removeIssuer(issuerAddress.trim() as `0x${string}`);
+                          setIssuerAddress("");
+                        } catch (e) {
+                          setIssuerActionError(e instanceof Error ? e.message : "Failed to remove issuer");
+                        } finally {
+                          setIssuerActionLoading(false);
+                        }
+                      }}
+                    >
+                      Remove issuer
+                    </Button>
+                  </div>
+                  {issuerActionError && <p className="text-xs text-destructive">{issuerActionError}</p>}
                 </div>
               )}
               <form onSubmit={handleSubmit} className="space-y-4">
@@ -251,12 +309,15 @@ const IssueCredential = () => {
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">Student number</Label>
                   <Input
-                    placeholder="e.g. 2021-000123"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="e.g. 2021000123"
                     value={form.studentNumber}
-                    onChange={(e) => setForm((f) => ({ ...f, studentNumber: e.target.value }))}
+                    onChange={(e) => setForm((f) => ({ ...f, studentNumber: e.target.value.replace(/\D/g, "") }))}
                     className="text-sm"
                   />
-                  <p className="text-[11px] text-muted-foreground">Used to search credentials by student number.</p>
+                  <p className="text-[11px] text-muted-foreground">Numbers only. Used to search credentials by student number.</p>
                 </div>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
@@ -453,9 +514,9 @@ const IssueCredential = () => {
                 <Button
                   type="submit"
                   className="w-full gap-2"
-                  disabled={loading || isOwner === false}
+                  disabled={loading || !canIssue}
                 >
-                  {loading ? "Issuing…" : isOwner === false ? "Connect owner wallet to issue" : "Issue credential"}
+                  {loading ? "Issuing…" : !canIssue ? "Connect owner or issuer wallet to issue" : "Issue credential"}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </form>

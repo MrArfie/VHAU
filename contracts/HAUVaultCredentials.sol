@@ -28,8 +28,11 @@ contract HAUVaultCredentials is ERC721Enumerable, Ownable {
 
     mapping(uint256 => Credential) public credentials;
     mapping(string => uint256) public tokenIdByStudentNumber;
+    mapping(address => bool) public issuers;
     uint256 private _nextId = 1;
 
+    event IssuerAdded(address indexed account);
+    event IssuerRemoved(address indexed account);
     event CredentialIssued(
         uint256 indexed tokenId,
         address indexed holder,
@@ -39,11 +42,27 @@ contract HAUVaultCredentials is ERC721Enumerable, Ownable {
 
     event CredentialRevoked(uint256 indexed tokenId);
 
+    modifier onlyOwnerOrIssuer() {
+        require(owner() == msg.sender || issuers[msg.sender], "Not owner or issuer");
+        _;
+    }
+
     constructor() ERC721("HAU Vault Credential", "HAUCRED") Ownable(msg.sender) {}
+
+    function addIssuer(address account) external onlyOwner {
+        require(account != address(0), "Zero address");
+        issuers[account] = true;
+        emit IssuerAdded(account);
+    }
+
+    function removeIssuer(address account) external onlyOwner {
+        issuers[account] = false;
+        emit IssuerRemoved(account);
+    }
 
     function issueCredential(address to, Credential calldata data)
         external
-        onlyOwner
+        onlyOwnerOrIssuer
         returns (uint256 tokenId)
     {
         tokenId = _nextId;

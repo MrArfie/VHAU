@@ -10,7 +10,7 @@ export const publicClient = createPublicClient({
   transport: http(),
 });
 
-/** Returns the contract owner address (only they can call issueCredential). */
+/** Returns the contract owner address. */
 export async function getContractOwner(): Promise<`0x${string}` | null> {
   if (HAU_VAULT_ADDRESS === "0x0000000000000000000000000000000000000000") {
     return null;
@@ -26,6 +26,56 @@ export async function getContractOwner(): Promise<`0x${string}` | null> {
   } catch {
     return null;
   }
+}
+
+/** Returns true if the address is allowed to issue credentials (owner or added issuer). */
+export async function getIsIssuer(address: string): Promise<boolean> {
+  if (HAU_VAULT_ADDRESS === "0x0000000000000000000000000000000000000000" || !address) {
+    return false;
+  }
+  try {
+    const owner = await getContractOwner();
+    if (owner && address.toLowerCase() === owner.toLowerCase()) return true;
+    const isIssuer = await publicClient.readContract({
+      address: HAU_VAULT_ADDRESS,
+      abi: hauVaultAbi,
+      functionName: "issuers",
+      args: [address as `0x${string}`],
+    } as any);
+    return (isIssuer as boolean) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/** Add an issuer (owner only). */
+export async function addIssuer(account: `0x${string}`): Promise<void> {
+  const walletClient = getWalletClient();
+  const [address] = await walletClient.getAddresses();
+  if (!address) throw new Error("Connect your wallet first.");
+  const hash = await walletClient.writeContract({
+    address: HAU_VAULT_ADDRESS,
+    abi: hauVaultAbi,
+    functionName: "addIssuer",
+    args: [account],
+    account: address,
+  } as any);
+  await publicClient.waitForTransactionReceipt({ hash });
+}
+
+/** Remove an issuer (owner only). */
+export async function removeIssuer(account: `0x${string}`): Promise<void> {
+  const walletClient = getWalletClient();
+  const [address] = await walletClient.getAddresses();
+  if (!address) throw new Error("Connect your wallet first.");
+  const hash = await walletClient.writeContract({
+    address: HAU_VAULT_ADDRESS,
+    abi: hauVaultAbi,
+    functionName: "removeIssuer",
+    args: [account],
+    account: address,
+  } as any);
+  await publicClient.waitForTransactionReceipt({ hash });
 }
 
 export async function readCredential(tokenId: bigint) {
@@ -124,16 +174,22 @@ function normalizeRevertError(simErr: unknown): Error {
       const args = decoded.args;
       if (name === "OwnableUnauthorizedAccount") {
         return new Error(
-          "Only the contract owner can issue credentials. Connect the same MetaMask account that deployed the contract in Remix."
+          "Only the contract owner or an authorized issuer can issue credentials. Ask the owner to add your wallet as an issuer."
         );
+      }
+      if (name === "Error" && args && typeof (args as unknown as { message?: string }).message === "string") {
+        const msg = (args as unknown as { message: string }).message;
+        if (msg.includes("Not owner or issuer")) {
+          return new Error(
+            "Only the contract owner or an authorized issuer can issue credentials. Ask the owner to add your wallet as an issuer."
+          );
+        }
+        return new Error(`Contract reverted: ${msg}`);
       }
       if (name === "ERC721InvalidReceiver") {
         return new Error(
           "The contract uses _safeMint but the recipient address does not accept NFTs. Redeploy the contract with _mint(to, tokenId) instead of _safeMint in Remix, then update src/config.ts with the new address."
         );
-      }
-      if (name === "Error" && args && typeof (args as unknown as { message?: string }).message === "string") {
-        return new Error(`Contract reverted: ${(args as unknown as { message: string }).message}`);
       }
       return new Error(`Contract reverted: ${name}${args ? ` (${JSON.stringify(args)})` : ""}`);
     } catch {
@@ -151,7 +207,13 @@ function normalizeRevertError(simErr: unknown): Error {
     const args = err.errorArgs ?? err.args;
     if (name === "OwnableUnauthorizedAccount" && args && typeof (args as { account?: string }).account === "string") {
       return new Error(
-        "Only the contract owner can issue credentials. Connect the same MetaMask account that deployed the contract in Remix."
+        "Only the contract owner or an authorized issuer can issue credentials. Ask the owner to add your wallet as an issuer."
+      );
+    }
+    const errMsg = args && typeof (args as { message?: string }).message === "string" ? (args as { message: string }).message : "";
+    if (errMsg && errMsg.includes("Not owner or issuer")) {
+      return new Error(
+        "Only the contract owner or an authorized issuer can issue credentials. Ask the owner to add your wallet as an issuer."
       );
     }
     if (name === "ERC721InvalidReceiver") {

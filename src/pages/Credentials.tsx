@@ -370,9 +370,12 @@ const Credentials = () => {
               </Label>
               <Input
                 id="studentNumber"
-                placeholder="e.g. 2021-000123"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="e.g. 2021000123"
                 value={studentNumber}
-                onChange={(e) => setStudentNumber(e.target.value)}
+                onChange={(e) => setStudentNumber(e.target.value.replace(/\D/g, ""))}
                 className="h-10 text-sm"
               />
             </div>
@@ -397,9 +400,10 @@ const Credentials = () => {
                   id="studentId"
                   type="text"
                   inputMode="numeric"
+                  pattern="[0-9]*"
                   placeholder="e.g. 1, 2, 3"
                   value={studentId}
-                  onChange={(e) => setStudentId(e.target.value)}
+                  onChange={(e) => setStudentId(e.target.value.replace(/\D/g, ""))}
                   className="h-10 text-sm"
                 />
               </div>
